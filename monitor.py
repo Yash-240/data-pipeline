@@ -3,11 +3,13 @@ import os
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import time
+import sqlite3
 
 # Define the folder path to monitor
-FOLDER_TO_MONITOR = "/Users/yashwanth/Documents/bosch_internship/data_pipeline/data"
-TARGET_FILENAME = "data_2017_07.csv"
-QUARANTINE_FOLDER = "/Users/yashwanth/Documents/bosch_internship/data_pipeline/quarantine"
+FOLDER_TO_MONITOR = # local path 
+TARGET_FILENAME = # local path example.csv
+QUARANTINE_FOLDER = # local path 
+DB_PATH = # local path  example.db
 
 class FileEventHandler(FileSystemEventHandler):
     def on_created(self, event):
@@ -69,7 +71,6 @@ def quarantine_file(file_path, reason):
     print(f"File moved to quarantine due to: {reason}")
 
 
-
 def start_data_transformation(file_path):
     print(f"Starting data transformation for: {file_path}")
     try:
@@ -88,11 +89,118 @@ def start_data_transformation(file_path):
         df.to_csv(file_path, index=False)
         print(f"Data transformation completed and saved to: {file_path}")
 
+        save_raw_data_to_db(file_path)
+        calculate_and_store_aggregated_metrics()
+
+
     except Exception as e:
         print(f"Error in data transformation: {e}")
 
-    print("Data transformation completed.")
+def save_raw_data_to_db(file_path):
+    print(f"Saving raw data to database for: {file_path}")
+    try:
+        # Read the CSV file after transformation (this assumes it's already transformed)
+        df = pd.read_csv(file_path)
 
+        # Connect to SQLite database (if it doesn't exist, it will be created)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # 1. Create the table if it doesn't exist
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS sensor_data (
+            sensor_id INTEGER,
+            location INTEGER,
+            lat REAL,
+            lon REAL,
+            timestamp TEXT,
+            pressure REAL,
+            temperature REAL,
+            humidity REAL,
+            date TEXT,
+            time TEXT
+        );
+        """
+        cursor.execute(create_table_query)
+
+        # 2. Insert data into the table
+        for _, row in df.iterrows():
+            insert_query = """
+            INSERT INTO sensor_data (sensor_id, location, lat, lon, timestamp, pressure, temperature, humidity, date, time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """
+            cursor.execute(insert_query, (
+                row['sensor_id'], row['location'], row['lat'], row['lon'],
+                row['timestamp'], row['pressure'], row['temperature'], 
+                row['humidity'], row['date'], row['time']
+            ))
+
+        # Commit the transaction and close the connection
+        conn.commit()
+        conn.close()
+
+        print(f"Raw data saved to database: {DB_PATH}")
+
+        
+    except Exception as e:
+        print(f"Error saving data to database: {e}")
+
+
+def calculate_and_store_aggregated_metrics():
+    try:
+        # Connect to SQLite database
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Fetch data from sensor_data table (ensure you have the required columns)
+        query = """
+        SELECT sensor_id, 
+               DATE(timestamp) AS date, 
+               temperature, 
+               'data_2017_07' AS filename
+        FROM sensor_data
+        """
+        df = pd.read_sql_query(query, conn)
+
+        # Group by sensor_id and date to calculate aggregated metrics
+        aggregated_df = df.groupby(['sensor_id', 'date']).agg(
+            min_temperature=('temperature', 'min'),
+            max_temperature=('temperature', 'max'),
+            avg_temperature=('temperature', 'mean'),
+            stddev_temperature=('temperature', 'std')
+        ).reset_index()
+
+        # Add filename column (assuming filename is the same for each group)
+        aggregated_df['filename'] = df['filename'].iloc[0]  # You can modify this if needed
+
+        # Create the aggregated_metrics table if it doesn't exist
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS aggregated_metrics (
+            sensor_id INTEGER,
+            date DATE,
+            min_temperature REAL,
+            max_temperature REAL,
+            avg_temperature REAL,
+            stddev_temperature REAL,
+            filename TEXT
+        )
+        ''')
+
+        # Insert aggregated metrics into the table
+        for _, row in aggregated_df.iterrows():
+            cursor.execute('''
+            INSERT INTO aggregated_metrics (sensor_id, date, min_temperature, max_temperature, avg_temperature, stddev_temperature, filename)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (row['sensor_id'], row['date'], row['min_temperature'], row['max_temperature'],
+                  row['avg_temperature'], row['stddev_temperature'], row['filename']))
+
+        # Commit changes and close the connection
+        conn.commit()
+        print("Aggregated metrics stored successfully.")
+        conn.close()
+
+    except Exception as e:
+        print(f"Error during aggregation and insertion: {e}")
 
 def monitor_folder():
     event_handler = FileEventHandler()
@@ -110,5 +218,3 @@ def monitor_folder():
 
 if __name__ == "__main__":
     monitor_folder()
-
-
