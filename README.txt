@@ -1,6 +1,8 @@
 Overview
 This project implements a real-time data pipeline for monitoring, validating, processing, and storing sensor data into a relational database. The solution was created as part of the internship task for Bosch, focusing on building a scalable and efficient data pipeline to handle sensor data.
 
+OPEN internship_task_solution.docx for design and architecture
+
 Files Overview:
 monitor.py: Main script for monitoring and processing sensor data.
 requirements.txt: Lists the Python dependencies required for the project.
